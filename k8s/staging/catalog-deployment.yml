@@ -1,0 +1,16 @@
+# k8s/staging/catalog-deployment.yml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalog
+  namespace: staging
+spec: # as before, with image: registry/.../catalog:${TAG}
+
+---
+# k8s/staging/user-deployment.yml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user-mgmt
+  namespace: staging
+spec: # similarly, image: registry/.../user-mgmt:${TAG}

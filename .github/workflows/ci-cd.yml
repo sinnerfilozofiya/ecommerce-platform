@@ -1,0 +1,142 @@
+# .github/workflows/ci-cd.yml
+
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ develop, main ]
+  pull_request:
+    branches: [ develop ]
+
+env:
+  REGISTRY: your-registry.example.com/your-org
+  STAGING_NAMESPACE: staging
+  PRODUCTION_NAMESPACE: production
+
+jobs:
+  build-and-test:
+    name: 🧪 Build & Test (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service:
+          - product-catalog-service
+          - user-management-service
+    defaults:
+      run:
+        working-directory: ${{ matrix.service }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 16
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Security scan (Snyk)
+        run: npx snyk test || true
+        # (failures here don’t block the pipeline; adjust as needed)
+
+  docker-build-push:
+    name: 🐳 Build & Push Docker (${{ matrix.service }})
+    needs: build-and-test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service:
+          - product-catalog-service
+          - user-management-service
+    defaults:
+      run:
+        working-directory: ${{ matrix.service }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Log in to container registry
+        uses: docker/login-action@v2
+        with:
+          registry: your-registry.example.com
+          username: ${{ secrets.REGISTRY_USER }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Build & tag Docker image
+        run: |
+          IMAGE=${{ env.REGISTRY }}/${{ matrix.service }}:${{ github.sha }}
+          docker build -t $IMAGE .
+      
+      - name: Push Docker image
+        run: |
+          IMAGE=${{ env.REGISTRY }}/${{ matrix.service }}:${{ github.sha }}
+          docker push $IMAGE
+
+  deploy-staging:
+    name: 🚀 Deploy to Staging (${{ matrix.service }})
+    needs: docker-build-push
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service:
+          - product-catalog-service
+          - user-management-service
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure kubectl for staging
+        run: |
+          echo "${{ secrets.KUBE_CONFIG_STAGING }}" | base64 -d > kubeconfig-staging
+          export KUBECONFIG=$PWD/kubeconfig-staging
+
+      - name: Deploy ${ matrix.service } to staging
+        run: |
+          IMAGE=${{ env.REGISTRY }}/${{ matrix.service }}:${{ github.sha }}
+          kubectl set image \
+            deployment/${{ matrix.service }} \
+            ${ { matrix.service }}=$IMAGE \
+            --namespace=${{ env.STAGING_NAMESPACE }}
+
+  promote-to-prod:
+    name: ⏫ Promote to Production (${{ matrix.service }})
+    needs: deploy-staging
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    strategy:
+      matrix:
+        service:
+          - product-catalog-service
+          - user-management-service
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure kubectl for production
+        run: |
+          echo "${{ secrets.KUBE_CONFIG_PROD }}" | base64 -d > kubeconfig-prod
+          export KUBECONFIG=$PWD/kubeconfig-prod
+
+      - name: Deploy ${ matrix.service } to production
+        run: |
+          IMAGE=${{ env.REGISTRY }}/${{ matrix.service }}:${{ github.sha }}
+          kubectl set image \
+            deployment/${{ matrix.service }} \
+            ${ { matrix.service }}=$IMAGE \
+            --namespace=${{ env.PRODUCTION_NAMESPACE }}

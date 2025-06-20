@@ -1,0 +1,33 @@
+version: '3.8'
+services:
+  product-catalog:
+    build: ./product-catalog-service
+    image: catalog:local
+    ports:
+      - "3001:3001"
+    environment:
+      - MONGO_URI=mongodb://mongo:27017/product_catalog_db
+    depends_on:
+      - mongo
+
+  user-management:
+    build: ./user-management-service
+    image: user-mgmt:local
+    ports:
+      - "3002:3002"
+    environment:
+      - MONGO_URI=mongodb://mongo:27017/user_mgmt_db
+      - JWT_SECRET=devsecret
+      - JWT_EXPIRES_IN=1h
+    depends_on:
+      - mongo
+
+  mongo:
+    image: mongo:6
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+
+volumes:
+  mongo-data:
